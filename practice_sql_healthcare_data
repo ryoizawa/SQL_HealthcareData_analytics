@@ -1,0 +1,390 @@
+USE Healthcare_DB
+ 	/*
+	Easy: Question 1
+	How many rows of data are in the FactTable that include 
+	a Gross Charge greater than $100?
+	*/
+
+SELECT
+    COUNT(*) AS num_charges_greater_than_100
+FROM FactTable
+WHERE FactTable.GrossCharge > 100
+
+	/*
+	Easy: Question 2
+	How many unique patients exist is the Healthcare_DB?
+	*/
+
+SELECT
+    COUNT(DISTINCT PatientNumber) as total_patient
+FROM dimPatient
+
+
+	/*
+	Easy: Question 3
+	How many CptCodes are in each CptGrouping?
+	*/
+
+SELECT
+    CptGrouping
+    ,COUNT(DISTINCT CptCode) AS num_of_cptcodes
+FROM dimCptCode
+GROUP BY CptGrouping
+ORDER BY 2 DESC
+
+
+	/*
+	Intermediate: Question 4
+	How many physicians have submitted a Medicare insurance claim?
+	*/
+
+SELECT
+    COUNT(DISTINCT ProviderName) AS num_of_physicians
+FROM FactTable
+    INNER JOIN dimPhysician
+        ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+    INNER JOIN dimPayer
+        ON dimPayer.dimPayerPK = FactTable.dimPayerPK
+WHERE PayerName = 'Medicare'
+
+SELECT
+    PayerName
+    ,COUNT(DISTINCT ProviderName) AS num_of_physicians
+FROM FactTable
+    INNER JOIN dimPhysician
+        ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+    INNER JOIN dimPayer
+        ON dimPayer.dimPayerPK = FactTable.dimPayerPK
+WHERE PayerName = 'Medicare'
+GROUP BY PayerName
+
+
+	/*
+	Intermediate: Question 5
+	Calculate the Gross Collection Rate (GCR) for each
+	LocationName - See Below 
+	GCR = Payments divided GrossCharge
+	Which LocationName has the highest GCR?
+	*/
+	
+SELECT
+    LocationName
+    ,FORMAT(-SUM(Payment) / SUM(GrossCharge), 'P1') AS GCR
+FROM FactTable
+INNER JOIN dimLocation
+    ON dimLocation.dimLocationPK = FactTable.dimLocationPK
+GROUP BY LocationName
+ORDER BY 2 DESC
+
+
+	/*
+	Intermediate: Question 6
+	How many CptCodes have more than 100 units?
+	*/
+
+SELECT
+    COUNT(*) AS count_greater100_units
+FROM(
+SELECT
+    CptCode
+    ,CptDesc
+    ,SUM(CPTUnits) AS units
+FROM FactTable
+INNER JOIN dimCptCode
+    ON dimCptCode.dimCPTCodePK = FactTable.dimCPTCodePK
+GROUP BY 
+    CptCode
+    ,CptDesc
+HAVING SUM(CPTUnits) > 100) AS a
+
+
+	/*
+	Intermediate: Question 7
+	Find the physician specialty that has received the highest
+	amount of payments. Then show the payments by month for 
+	this group of physicians. 
+	*/
+
+SELECT
+    ProviderSpecialty
+    ,-SUM(Payment) sum_payment
+FROM FactTable
+INNER JOIN dimPhysician
+    ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+GROUP BY ProviderSpecialty
+ORDER BY 2 DESC
+
+
+SELECT
+    dimPhysician.ProviderSpecialty
+   ,dimDate.MonthPeriod
+   ,dimDate.MonthYear
+    ,-SUM(Payment) sum_payment
+FROM FactTable
+INNER JOIN dimDate
+    ON dimDate.dimDatePostPK = FactTable.dimDatePostPK
+INNER JOIN dimPhysician
+    ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+WHERE ProviderSpecialty = 'Internal Medicine'
+GROUP BY
+    dimPhysician.ProviderSpecialty
+   ,dimDate.MonthPeriod
+   ,dimDate.MonthYear
+ORDER BY 2
+
+
+	/*
+	Intermediate: Question 8
+	How many CptUnits by DiagnosisCodeGroup are assigned to 
+	a "J code" Diagnosis (these are diagnosis codes with 
+	the letter J in the code)?
+	*/
+
+SELECT
+    DiagnosisCode
+    ,DiagnosisCodeGroup
+    ,SUM(CPTUnits) AS sum_units
+FROM FactTable
+INNER JOIN dimDiagnosisCode
+    ON dimDiagnosisCode.dimDiagnosisCodePK = FactTable.dimDiagnosisCodePK
+WHERE dimDiagnosisCode.DiagnosisCode LIKE 'J%'
+GROUP BY
+    DiagnosisCode
+    ,DiagnosisCodeGroup
+ORDER BY 3 DESC
+
+
+	/*
+	Easy: Question 9
+	You've been asked to put together a report that details 
+	Patient demographics. The report should group patients
+	into three buckets- Under 18, between 18-65, & over 65
+	Please include the following columns:
+		-First and Last name in the same column
+		-Email
+		-Patient Age
+		-City and State in the same column
+	*/
+
+SELECT
+    CONCAT(FirstName,  ' ', LastName) AS fullName
+    ,Email
+    ,PatientAge
+    ,CASE WHEN PatientAge < 18 THEN 'Under 18'
+          WHEN PatientAge BETWEEN 18 and 65 THEN '18-65'
+          WHEN 65 < PatientAge THEN 'Over 65'
+          ELSE NULL
+          END AS age_groups
+    ,CONCAT(City, ', ', [State]) as city_state
+FROM dimPatient
+
+
+	/*
+	Easy: Question 10
+	How many dollars have been written off (adjustments) due
+	to credentialing (AdjustmentReason)? Which location has the 
+	highest number of credentialing adjustments? How many 
+	physicians at this location have been impacted by 
+	credentialing adjustments? What does this mean?
+	*/
+
+SELECT
+    LocationName
+    ,-SUM(Adjustment) AS Cred_adj
+    ,COUNT(DISTINCT ProviderNpi) AS count_physicians
+FROM FactTable
+    INNER JOIN dimTransaction
+        ON dimTransaction.dimTransactionPK = FactTable.dimTransactionPK
+    INNER JOIN dimLocation
+        ON dimLocation.dimLocationPK = FactTable.dimLocationPK
+    INNER JOIN dimPhysician
+        ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+WHERE AdjustmentReason = 'Credentialing'
+GROUP BY LocationName
+ORDER BY 3 DESC
+
+-- AS a step2, idetify those doctors to let them credentiled
+-- It will allow the hospital to make a decision and make an actual action to reduce adjustment
+SELECT DISTINCT
+    dimPhysician.ProviderNpi
+    ,dimPhysician.ProviderName
+    ,-SUM(Adjustment) AS Cred_adj
+FROM FactTable
+    INNER JOIN dimTransaction
+        ON dimTransaction.dimTransactionPK = FactTable.dimTransactionPK
+    INNER JOIN dimLocation
+        ON dimLocation.dimLocationPK = FactTable.dimLocationPK
+    INNER JOIN dimPhysician
+        ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+WHERE AdjustmentReason = 'Credentialing'
+    AND LocationName = 'Angelstone Community Hospital'
+GROUP BY 
+    dimPhysician.ProviderNpi
+    ,dimPhysician.ProviderName
+ORDER BY 3 DESC
+
+
+	/*
+	Hard: Question 11
+	What is the average patientage by gender for patients
+	seen at Big Heart Community Hospital with a Diagnosis
+	that included Type 2 diabetes? And how many Patients
+	are included in that average?
+	*/
+
+-- It will allow us to figure out specific demografic of patients with Type2 diabetes
+SELECT
+    PatientGender
+    ,AVG(PatientAge) as avg
+    ,COUNT(DISTINCT PatientNumber) AS count_patients
+    --,SUM(PatientAge) / COUNT(DISTINCT PatientNumber) as avg_check
+FROM(
+    SELECT
+         DISTINCT FactTable.PatientNumber
+        ,dimPatient.PatientGender
+        ,dimPatient.PatientAge
+    FROM FactTable
+    INNER JOIN dimPatient
+        ON dimPatient.dimPatientPK = FactTable.dimPatientPK
+    INNER JOIN dimLocation
+        ON dimLocation.dimLocationPK = FactTable.dimLocationPK
+    INNER JOIN dimDiagnosisCode
+        ON dimDiagnosisCode.dimDiagnosisCodePK = FactTable.dimDiagnosisCodePK
+    WHERE LocationName = 'Big Heart Community Hospital'
+        AND DiagnosisCodeDescription LIKE '%Type 2%') AS a
+    GROUP BY PatientGender
+
+    	/*
+	Intermediate: Question 12
+	There are a two visit types that you have been asked
+	to compare (use CptDesc).
+		- Office/outpatient visit est
+		- Office/outpatient visit new
+	Show each CptCode, CptDesc and the assocaited CptUnits.
+	What is the Charge per CptUnit? (Reduce to two decimals)
+	What does this mean? 
+	*/
+
+SELECT
+    dimCptCode.CptCode
+    ,dimCptCode.CptDesc
+    ,SUM(CPTUnits) as sum_units
+    ,SUM(GrossCharge) as sum_charges
+    ,SUM(GrossCharge) / SUM(CPTUnits) as charges_per_units
+FROM FactTable
+INNER JOIN dimCptCode
+    ON dimCptCode.dimCPTCodePK = FactTable.dimCptCodePK
+WHERE CptDesc IN ('Office/outpatient visit est', 'Office/outpatient visit new')
+GROUP BY
+    dimCptCode.CptCode
+    ,dimCptCode.CptDesc
+ORDER BY 1, 2 DESC
+
+
+	/*
+	Hard: Question 13
+	Similar to Question 12, you've been asked to analysis
+	the PaymentperUnit (NOT ChargeperUnit). You've been 
+	tasked with finding the PaymentperUnit by PayerName. 
+	Do this analysis on the following visit type (CptDesc)
+		- Initial hospital care
+	Show each CptCode, CptDesc and associated CptUnits.
+	**Note you will encounter a zero value error. If you
+	can't remember what to do find the ifnull lecture in 
+	Section 8. 
+	What does this mean?
+	*/
+
+SELECT
+    CptCode
+    ,CptDesc
+    ,PayerName
+    ,SUM(CPTUnits) as CptUnits
+    ,-SUM(Payment) / NULLIF(SUM(CPTUnits),0) AS payment_per_unit
+FROM FactTable
+INNER JOIN dimCptCode
+    ON dimCptCode.dimCptCodePK = FactTable.dimCPTCodePK
+INNER JOIN dimPayer
+    ON dimPayer.dimPayerPK = FactTable.dimPayerPK
+WHERE dimCptCode.CptDesc = 'Initial hospital care'
+    AND CptCode = '99223'
+GROUP BY
+    CptCode
+    ,CptDesc
+    ,PayerName
+
+
+/*
+	Hard: Question 14
+	Within the FactTable we are able to see GrossCharges. 
+	You've been asked to find the NetCharge, which means
+	Contractual adjustments need to be subtracted from the
+	GrossCharge (GrossCharges - Contractual Adjustments).
+	After you've found the NetCharge then calculate the 
+	Net Collection Rate (Payments/NetCharge) for each 
+	physician specialty. Which physician specialty has the 
+	worst Net Collection Rate with a NetCharge greater than 
+	$25,000? What is happening here? Where are the other 
+	dollars and why aren't they being collected?
+	What does this mean?
+	*/
+
+SELECT
+    ProviderSpecialty
+    ,sum_charges
+    ,contractual_adj
+    ,net_charge
+    ,sum_payment
+    ,sum_adjustment - contractual_adj
+    ,-sum_payment / net_charge as net_collection_rate
+    ,sum_ar
+    ,sum_ar / net_charge as percent_in_ar
+    ,(-sum_adjustment - contractual_adj) / net_charge as writeoff_rate
+FROM(
+
+    SELECT
+        ProviderSpecialty
+        ,SUM(GrossCharge) as sum_charges
+        ,SUM(CASE WHEN AdjustmentReason = 'Contractual' THEN Adjustment
+                  ELSE NULL END) AS contractual_adj
+        ,SUM(GrossCharge) +
+        SUM(CASE WHEN AdjustmentReason = 'Contractual' THEN Adjustment
+                  ELSE NULL END) AS net_charge
+        ,SUM(Payment) as sum_payment
+        ,SUM(Adjustment) as sum_adjustment
+        ,SUM(AR) as sum_ar
+    FROM FactTable
+    INNER JOIN dimPhysician
+        ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+    INNER JOIN dimTransaction
+        ON dimTransaction.dimTransactionPK = FactTable.dimTransactionPK
+    GROUP BY ProviderSpecialty) a
+    WHERE net_charge > 25000
+    ORDER BY net_collection_rate
+
+
+    	/*
+	Easy: Question 15
+	Build a Table that includes the following elements:
+		- LocationName
+		- CountofPhysicians
+		- CountofPatients
+		- GrossCharge
+		- AverageChargeperPatients 
+	*/
+
+SELECT
+    LocationName
+    ,COUNT(DISTINCT dimPhysician.ProviderNpi) as count_physicians
+    ,COUNT(DISTINCT dimPatient.PatientNumber) as count_patients
+    ,SUM(GrossCharge) as sum_grosscharge
+    ,SUM(GrossCharge) / COUNT(DISTINCT dimPatient.PatientNumber) as avg_charge_per_patients
+FROM FactTable
+INNER JOIN dimLocation
+    ON dimLocation.dimLocationPK = FactTable.dimLocationPK
+INNER JOIN dimPhysician
+    ON dimPhysician.dimPhysicianPK = FactTable.dimPhysicianPK
+INNER JOIN dimPatient
+    ON dimPatient.dimPatientPK = FactTable.dimPatientPK
+GROUP BY
+    LocationName
